@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#030712"/>
+  <!-- Purple accent bar -->
+  <rect x="0" y="400" width="512" height="112" rx="0" fill="#4f46e5" opacity="0.3"/>
+  <rect x="0" y="440" width="512" height="72" rx="0" fill="#4f46e5" opacity="0.3"/>
+  <!-- N letterform -->
+  <rect x="80" y="160" width="52" height="192" rx="10" fill="#6366f1"/>
+  <polygon points="80,160 132,160 252,308 252,160 304,160 304,352 252,352 132,204 132,352 80,352" fill="#6366f1"/>
+  <!-- F letterform -->
+  <rect x="328" y="160" width="52" height="192" rx="10" fill="#a5b4fc"/>
+  <rect x="328" y="160" width="120" height="44" rx="10" fill="#a5b4fc"/>
+  <rect x="328" y="236" width="96" height="40" rx="10" fill="#a5b4fc"/>
+</svg>

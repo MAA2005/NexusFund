@@ -1,0 +1,21 @@
+{
+  "name": "nexusfund-contracts",
+  "version": "1.0.0",
+  "description": "NexusFund smart contracts deployed on Polygon",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "deploy:amoy": "hardhat run scripts/deploy.js --network amoy",
+    "verify:amoy": "hardhat verify --network amoy",
+    "slither": "slither . --json slither-report.json"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.28.6"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5"
+  }
+}

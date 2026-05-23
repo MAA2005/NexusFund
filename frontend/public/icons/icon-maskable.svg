@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full bleed background — maskable icons must fill the entire canvas -->
+  <rect width="512" height="512" fill="#030712"/>
+  <!-- Safe zone is the inner 80% (approx 205–307). Letters are centered within it. -->
+  <!-- N letterform (scaled down and centered) -->
+  <polygon points="110,170 158,170 264,304 264,170 312,170 312,342 264,342 158,208 158,342 110,342" fill="#6366f1"/>
+  <!-- F letterform -->
+  <rect x="332" y="170" width="44" height="172" rx="8" fill="#a5b4fc"/>
+  <rect x="332" y="170" width="100" height="38" rx="8" fill="#a5b4fc"/>
+  <rect x="332" y="238" width="80" height="34" rx="8" fill="#a5b4fc"/>
+  <!-- Bottom accent -->
+  <rect x="0" y="468" width="512" height="44" fill="#4f46e5" opacity="0.5"/>
+</svg>
