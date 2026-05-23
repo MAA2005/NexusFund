@@ -23,14 +23,16 @@ async function uploadToIPFS(file) {
     return `${PINATA_GATEWAY}/ipfs/${data.IpfsHash}`;
 }
 
-// ─── Drag-to-reposition + zoom image component ────────────────────────────────
+// ─── Image positioner: scale + translate approach (no objectFit conflict) ─────
 function ImagePositioner({ src, position, onPositionChange }) {
-    const containerRef = useRef(null);
-    const dragging     = useRef(false);
-    const lastPos      = useRef({ x: 0, y: 0 });
+    const dragging  = useRef(false);
+    const lastPos   = useRef({ x: 0, y: 0 });
     const [zoom, setZoom] = useState(1);
 
     const clamp = (val, min, max) => Math.min(Math.max(val, min), max);
+
+    // Max pan in px depends on zoom level — more zoom = more room to pan
+    const maxPan = (zoom - 1) * 150;
 
     const startDrag = useCallback((clientX, clientY) => {
         if (zoom <= 1) return;
@@ -43,69 +45,96 @@ function ImagePositioner({ src, position, onPositionChange }) {
         const dx = clientX - lastPos.current.x;
         const dy = clientY - lastPos.current.y;
         lastPos.current = { x: clientX, y: clientY };
-        onPositionChange((prev) => ({
-            x: clamp(prev.x + dx, -200, 200),
-            y: clamp(prev.y + dy, -200, 200),
-        }));
-    }, [onPositionChange]);
+        onPositionChange((prev) => {
+            const mp = (zoom - 1) * 150;
+            return {
+                x: clamp(prev.x + dx, -mp, mp),
+                y: clamp(prev.y + dy, -mp, mp),
+            };
+        });
+    }, [onPositionChange, zoom]);
 
     const stopDrag = useCallback(() => { dragging.current = false; }, []);
 
+    function handleReset() {
+        setZoom(1);
+        onPositionChange({ x: 0, y: 0 });
+    }
+
+    function handleZoomChange(e) {
+        const newZoom = Number(e.target.value);
+        setZoom(newZoom);
+        if (newZoom <= 1) onPositionChange({ x: 0, y: 0 });
+        else {
+            // clamp existing position to new maxPan
+            const mp = (newZoom - 1) * 150;
+            onPositionChange((prev) => ({
+                x: clamp(prev.x, -mp, mp),
+                y: clamp(prev.y, -mp, mp),
+            }));
+        }
+    }
+
     return (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
+            {/* Frame */}
             <div
-                ref={containerRef}
                 className="relative w-full h-56 rounded-xl overflow-hidden select-none border border-gray-700 bg-gray-900"
                 style={{ cursor: zoom > 1 ? "grab" : "default" }}
                 onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
                 onMouseMove={(e) => onDrag(e.clientX, e.clientY)}
                 onMouseUp={stopDrag}
                 onMouseLeave={stopDrag}
-                onTouchStart={(e) => startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                onTouchStart={(e) => { e.preventDefault(); startDrag(e.touches[0].clientX, e.touches[0].clientY); }}
                 onTouchMove={(e) => { e.preventDefault(); onDrag(e.touches[0].clientX, e.touches[0].clientY); }}
                 onTouchEnd={stopDrag}
             >
-                <img
-                    src={src}
-                    alt="Preview"
-                    draggable={false}
-                    className="absolute inset-0 w-full h-full pointer-events-none transition-transform duration-100"
+                {/* Image wrapper — scale + translate here, NOT on the img tag */}
+                <div
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none"
                     style={{
-                        objectFit: zoom <= 1 ? "contain" : "cover",
-                        objectPosition: `calc(50% + ${position.x}px) calc(50% + ${position.y}px)`,
-                        transform: `scale(${zoom})`,
+                        transform: `scale(${zoom}) translate(${position.x / zoom}px, ${position.y / zoom}px)`,
                         transformOrigin: "center",
+                        transition: dragging.current ? "none" : "transform 0.05s",
                     }}
-                />
-                {zoom <= 1 && (
-                    <div className="absolute bottom-2 right-2 text-xs text-gray-400 bg-black/50 px-2 py-1 rounded-full backdrop-blur-sm">
-                        Zoom in to reposition
-                    </div>
-                )}
-                {zoom > 1 && (
-                    <div className="absolute bottom-2 right-2 text-xs text-white bg-black/60 px-2 py-1 rounded-full backdrop-blur-sm">
-                        Drag to reposition
-                    </div>
-                )}
+                >
+                    <img
+                        src={src}
+                        alt="Preview"
+                        draggable={false}
+                        className="w-full h-full"
+                        style={{ objectFit: "contain" }}
+                    />
+                </div>
+
+                {/* Hint badge */}
+                <div className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-1 rounded-full backdrop-blur-sm pointer-events-none">
+                    {zoom <= 1 ? "Zoom to reposition" : "Drag to reposition"}
+                </div>
             </div>
 
-            {/* Zoom slider */}
+            {/* Controls */}
             <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500 w-8">Zoom</span>
+                <span className="text-xs text-gray-500 w-8 shrink-0">Zoom</span>
                 <input
                     type="range"
                     min="1"
                     max="3"
                     step="0.05"
                     value={zoom}
-                    onChange={(e) => {
-                        const newZoom = Number(e.target.value);
-                        setZoom(newZoom);
-                        if (newZoom <= 1) onPositionChange({ x: 0, y: 0 });
-                    }}
+                    onChange={handleZoomChange}
                     className="flex-1 accent-blue-500 cursor-pointer"
                 />
-                <span className="text-xs text-gray-500 w-8">{zoom.toFixed(1)}x</span>
+                <span className="text-xs text-gray-500 w-8 shrink-0 text-right">{zoom.toFixed(1)}x</span>
+                {zoom > 1 && (
+                    <button
+                        type="button"
+                        onClick={handleReset}
+                        className="text-xs text-blue-400 hover:text-blue-300 transition-colors shrink-0 border border-blue-800 px-2 py-1 rounded-lg"
+                    >
+                        Reset
+                    </button>
+                )}
             </div>
         </div>
     );
@@ -174,9 +203,6 @@ export default function CreateCampaign() {
             if (form.imageFile && PINATA_JWT) {
                 setStep("uploading");
                 image_url = await uploadToIPFS(form.imageFile);
-                if (imagePosition.x !== 0 || imagePosition.y !== 0) {
-                    image_url += `#pos:${imagePosition.x},${imagePosition.y}`;
-                }
             }
 
             setStep("saving");
