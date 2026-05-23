@@ -12,12 +12,6 @@ const STATUS_STYLES = {
     WITHDRAWN:  "bg-gray-800     text-gray-400",
 };
 
-const DEPLOY_STYLES = {
-    PENDING:  "bg-yellow-900/50 text-yellow-400",
-    DEPLOYED: "bg-green-900/50  text-green-400",
-    FAILED:   "bg-red-900/50    text-red-400",
-};
-
 export default function Dashboard() {
     const { t } = useTranslation();
     const { user } = useAuth();
@@ -111,13 +105,6 @@ export default function Dashboard() {
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_STYLES[c.status]}`}>
                                                 {t(`campaign.status_${c.status.toLowerCase()}`)}
-                                            </span>
-                                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${DEPLOY_STYLES[c.deployment_status]}`}>
-                                                {c.deployment_status === "DEPLOYED"
-                                                    ? t("dashboard.deployed")
-                                                    : c.deployment_status === "PENDING"
-                                                    ? t("dashboard.deploying")
-                                                    : t("dashboard.deploy_failed")}
                                             </span>
                                             <span className="text-xs text-gray-600 capitalize">{c.category}</span>
                                         </div>
