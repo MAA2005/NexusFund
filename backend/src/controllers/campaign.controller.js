@@ -1,5 +1,12 @@
 const prisma = require("../lib/prisma");
 
+// Prisma returns Decimal objects for goal_amount. Explicitly convert to string
+// before sending so JSON.stringify never fails regardless of Node/Prisma version.
+function serializeCampaign(c) {
+    if (!c) return c;
+    return { ...c, goal_amount: c.goal_amount?.toString() ?? "0" };
+}
+
 // Fields returned in list view — omit description to keep responses small
 const CAMPAIGN_LIST_SELECT = {
     id:               true,
@@ -55,7 +62,7 @@ async function createCampaign(req, res) {
             },
         });
 
-        return res.status(201).json({ campaign });
+        return res.status(201).json({ campaign: serializeCampaign(campaign) });
     } catch (err) {
         // P2002: unique constraint — contract_address is already used by another campaign
         if (err.code === "P2002") {
@@ -104,7 +111,7 @@ async function listCampaigns(req, res) {
         ]);
 
         return res.json({
-            campaigns,
+            campaigns: campaigns.map(serializeCampaign),
             pagination: {
                 total,
                 page,
@@ -115,7 +122,7 @@ async function listCampaigns(req, res) {
             },
         });
     } catch (err) {
-        console.error("[listCampaigns]", err);
+        console.error("[listCampaigns]", err.message, err.stack);
         return res.status(500).json({ error: "Failed to fetch campaigns." });
     }
 }
@@ -132,9 +139,9 @@ async function getCampaign(req, res) {
             return res.status(404).json({ error: "Campaign not found." });
         }
 
-        return res.json({ campaign });
+        return res.json({ campaign: serializeCampaign(campaign) });
     } catch (err) {
-        console.error("[getCampaign]", err);
+        console.error("[getCampaign]", err.message, err.stack);
         return res.status(500).json({ error: "Failed to fetch campaign." });
     }
 }
@@ -165,12 +172,12 @@ async function updateCampaign(req, res) {
             select: CAMPAIGN_DETAIL_SELECT,
         });
 
-        return res.json({ campaign: updated });
+        return res.json({ campaign: serializeCampaign(updated) });
     } catch (err) {
         if (err.code === "P2002") {
             return res.status(409).json({ error: "A campaign with this contract address already exists." });
         }
-        console.error("[updateCampaign]", err);
+        console.error("[updateCampaign]", err.message, err.stack);
         return res.status(500).json({ error: "Failed to update campaign." });
     }
 }
@@ -196,7 +203,7 @@ async function getMyCampaigns(req, res) {
         ]);
 
         return res.json({
-            campaigns,
+            campaigns: campaigns.map(serializeCampaign),
             pagination: {
                 total,
                 page,
@@ -207,7 +214,7 @@ async function getMyCampaigns(req, res) {
             },
         });
     } catch (err) {
-        console.error("[getMyCampaigns]", err);
+        console.error("[getMyCampaigns]", err.message, err.stack);
         return res.status(500).json({ error: "Failed to fetch your campaigns." });
     }
 }
