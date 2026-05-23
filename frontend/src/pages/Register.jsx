@@ -9,9 +9,7 @@ export default function Register() {
     const { login } = useAuth();
     const navigate  = useNavigate();
 
-    const [form, setForm] = useState({
-        email: "", password: "", country: "", wallet_address: "",
-    });
+    const [form, setForm] = useState({ email: "", password: "", country: "" });
     const [errors,   setErrors]   = useState({});
     const [loading,  setLoading]  = useState(false);
     const [apiError, setApiError] = useState("");
@@ -33,8 +31,6 @@ export default function Register() {
         if (form.password && !/[0-9]/.test(form.password))
             errs.password = t("register.error_password_number");
         if (!form.country)  errs.country  = t("register.error_country");
-        if (form.wallet_address && !/^0x[a-fA-F0-9]{40}$/.test(form.wallet_address))
-            errs.wallet_address = t("register.error_wallet");
         return errs;
     }
 
@@ -46,13 +42,11 @@ export default function Register() {
         setLoading(true);
         setApiError("");
         try {
-            const payload = {
-                email:          form.email,
-                password:       form.password,
-                country:        form.country,
-                wallet_address: form.wallet_address || null,
-            };
-            const res = await client.post("/api/auth/register", payload);
+            const res = await client.post("/api/auth/register", {
+                email:    form.email,
+                password: form.password,
+                country:  form.country,
+            });
             login(res.data.token, res.data.user);
             navigate("/");
         } catch (err) {
@@ -108,16 +102,6 @@ export default function Register() {
                             <input id="country" name="country" type="text" value={form.country} onChange={handleChange}
                                 className={fieldClass("country")} placeholder={t("register.country_placeholder")} />
                             {errors.country && <p className="mt-1 text-xs text-red-400">{errors.country}</p>}
-                        </div>
-
-                        <div>
-                            <label htmlFor="wallet_address" className="block text-sm font-medium text-gray-300 mb-1.5">
-                                {t("register.wallet_address")}{" "}
-                                <span className="text-gray-500 font-normal">{t("register.wallet_optional")}</span>
-                            </label>
-                            <input id="wallet_address" name="wallet_address" type="text" value={form.wallet_address} onChange={handleChange}
-                                className={fieldClass("wallet_address")} placeholder={t("register.wallet_placeholder")} />
-                            {errors.wallet_address && <p className="mt-1 text-xs text-red-400">{errors.wallet_address}</p>}
                         </div>
 
                         <button type="submit" disabled={loading}

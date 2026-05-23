@@ -69,7 +69,7 @@ export default function CampaignCard({ campaign }) {
                     <p className="text-sm text-gray-400">
                         Goal:{" "}
                         <span className="text-white font-medium">
-                            {Number(goal_amount).toLocaleString()} USDC
+                            ${Number(goal_amount).toLocaleString()}
                         </span>
                     </p>
                     {localGoal && (

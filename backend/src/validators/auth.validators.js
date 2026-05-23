@@ -4,7 +4,7 @@ const registerSchema = z.object({
     email: z
         .string({ required_error: "Email is required" })
         .email("Invalid email address")
-        .toLowerCase() // normalise before DB insert — prevents duplicate accounts with different casing
+        .toLowerCase()
         .trim(),
 
     password: z
@@ -18,17 +18,6 @@ const registerSchema = z.object({
         .min(2,   "Country must be at least 2 characters")
         .max(100, "Country name is too long")
         .trim(),
-
-    // Wallet address is optional at registration — users without MetaMask can still sign up.
-    // Phase 2 introduces custodial wallets for them.
-    wallet_address: z
-        .string()
-        .regex(
-            /^0x[a-fA-F0-9]{40}$/,
-            "Wallet address must be a valid Ethereum address (0x followed by 40 hex characters)"
-        )
-        .optional()
-        .nullable(),
 });
 
 const loginSchema = z.object({

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../hooks/useAuth";
-import { useWallet } from "../hooks/useWallet";
 
 const LANGUAGES = [
     { code: "en", label: "EN", name: "English" },
@@ -36,7 +35,6 @@ function LanguageSwitcher() {
 
             {open && (
                 <>
-                    {/* Backdrop to close on outside click */}
                     <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
                     <div className="absolute end-0 top-full mt-1 z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-xl overflow-hidden min-w-[130px]">
                         {LANGUAGES.map((lang) => (
@@ -63,7 +61,6 @@ function LanguageSwitcher() {
 export default function Navbar() {
     const { t, i18n } = useTranslation();
     const { isAuthenticated, user, logout } = useAuth();
-    const { isConnected, shortAccount, connect, connecting, isCorrectNetwork, switchToAmoy } = useWallet();
     const [mobileOpen, setMobileOpen] = useState(false);
     const navigate = useNavigate();
 
@@ -81,7 +78,6 @@ export default function Navbar() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-16">
 
-                    {/* Logo */}
                     <Link to="/" className="flex items-center gap-2 flex-shrink-0">
                         <span className="text-xl font-bold tracking-tight text-white">
                             Nexus<span className="text-primary-500">Fund</span>
@@ -95,7 +91,6 @@ export default function Navbar() {
                             <>
                                 <NavLink to="/create"    className={linkClass}>{t("nav.create")}</NavLink>
                                 <NavLink to="/dashboard" className={linkClass}>{t("nav.dashboard")}</NavLink>
-                                <NavLink to="/cashout"   className={linkClass}>{t("nav.cashout")}</NavLink>
                             </>
                         )}
                     </div>
@@ -104,31 +99,6 @@ export default function Navbar() {
                     <div className="hidden md:flex items-center gap-3">
                         <LanguageSwitcher />
 
-                        {/* Wallet button */}
-                        {isConnected ? (
-                            isCorrectNetwork ? (
-                                <span className="text-xs font-mono bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-lg">
-                                    {shortAccount}
-                                </span>
-                            ) : (
-                                <button
-                                    onClick={switchToAmoy}
-                                    className="text-xs bg-orange-900/50 border border-orange-700 text-orange-300 px-3 py-1.5 rounded-lg hover:bg-orange-900 transition-colors"
-                                >
-                                    {t("nav.wrong_network")}
-                                </button>
-                            )
-                        ) : (
-                            <button
-                                onClick={connect}
-                                disabled={connecting}
-                                className="text-sm bg-gray-800 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-lg hover:border-primary-500 hover:text-white transition-colors disabled:opacity-50"
-                            >
-                                {connecting ? t("nav.connecting") : t("nav.connect_wallet")}
-                            </button>
-                        )}
-
-                        {/* Auth buttons */}
                         {isAuthenticated ? (
                             <div className="flex items-center gap-3">
                                 <span className="text-sm text-gray-500 hidden lg:block">{user?.email}</span>
@@ -175,16 +145,14 @@ export default function Navbar() {
                         <>
                             <NavLink to="/create"    className={linkClass} onClick={() => setMobileOpen(false)}>{t("nav.create")}</NavLink>
                             <NavLink to="/dashboard" className={linkClass} onClick={() => setMobileOpen(false)}>{t("nav.dashboard")}</NavLink>
-                            <NavLink to="/cashout"   className={linkClass} onClick={() => setMobileOpen(false)}>{t("nav.cashout")}</NavLink>
                         </>
                     )}
                     <div className="pt-4 border-t border-gray-800 flex flex-col gap-3">
-                        {/* Language switcher in mobile */}
                         <div className="flex gap-2 flex-wrap">
                             {LANGUAGES.map((lang) => (
                                 <button
                                     key={lang.code}
-                                    onClick={() => i18n.changeLanguage(lang.code)}
+                                    onClick={() => { i18n.changeLanguage(lang.code); setMobileOpen(false); }}
                                     className={`text-xs border px-2.5 py-1 rounded-lg transition-colors
                                         ${lang.code === i18n.language
                                             ? "border-primary-500 text-primary-400"
@@ -195,14 +163,6 @@ export default function Navbar() {
                                 </button>
                             ))}
                         </div>
-
-                        {isConnected ? (
-                            <span className="text-xs font-mono text-gray-400">{shortAccount}</span>
-                        ) : (
-                            <button onClick={connect} disabled={connecting} className="text-sm text-start text-gray-400 hover:text-white disabled:opacity-50">
-                                {connecting ? t("nav.connecting") : t("nav.connect_wallet")}
-                            </button>
-                        )}
                         {isAuthenticated ? (
                             <button onClick={handleLogout} className="text-sm text-start text-gray-400 hover:text-white">
                                 {t("nav.logout")}

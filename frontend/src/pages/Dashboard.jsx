@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import client from "../api/client";
 import { useAuth } from "../hooks/useAuth";
-import { useCurrency } from "../hooks/useCurrency";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 const STATUS_STYLES = {
@@ -13,51 +12,11 @@ const STATUS_STYLES = {
     WITHDRAWN:  "bg-gray-800     text-gray-400",
 };
 
-function WalletCard() {
-    const { t } = useTranslation();
-    const { formatUSDC } = useCurrency();
-    const [data,    setData]    = useState(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        client.get("/api/wallet/balance")
-            .then((r) => setData(r.data))
-            .catch(() => setData(null))
-            .finally(() => setLoading(false));
-    }, []);
-
-    const localBalance = data ? formatUSDC(data.usdc_balance) : null;
-
-    return (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-8">
-            <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">{t("dashboard.wallet_label")}</p>
-            {loading ? (
-                <div className="flex items-center gap-2 text-gray-500 text-sm">
-                    <LoadingSpinner size="sm" /> {t("dashboard.wallet_loading")}
-                </div>
-            ) : !data ? (
-                <p className="text-sm text-red-400">{t("dashboard.wallet_error")}</p>
-            ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                    <div className="flex-1">
-                        <p className="text-xs text-gray-500 mb-1">{t("dashboard.wallet_address")}</p>
-                        <p className="font-mono text-sm text-gray-300 break-all">{data.wallet_address}</p>
-                    </div>
-                    <div className="sm:text-end">
-                        <p className="text-xs text-gray-500 mb-1">{t("dashboard.wallet_balance")}</p>
-                        <p className="text-2xl font-bold text-white">
-                            ${Number(data.usdc_balance).toFixed(2)}
-                        </p>
-                        <p className="text-xs text-gray-600 mt-0.5">{data.usdc_balance} USDC</p>
-                        {localBalance && (
-                            <p className="text-xs text-gray-500 mt-0.5">≈ {localBalance}</p>
-                        )}
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
+const DEPLOY_STYLES = {
+    PENDING:  "bg-yellow-900/50 text-yellow-400",
+    DEPLOYED: "bg-green-900/50  text-green-400",
+    FAILED:   "bg-red-900/50    text-red-400",
+};
 
 export default function Dashboard() {
     const { t } = useTranslation();
@@ -99,7 +58,6 @@ export default function Dashboard() {
     return (
         <div className="min-h-screen bg-gray-950">
             <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-                {/* Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-bold text-white">{t("dashboard.title")}</h1>
@@ -119,8 +77,6 @@ export default function Dashboard() {
                         {error}
                     </div>
                 )}
-
-                <WalletCard />
 
                 {/* Tabs */}
                 <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 mb-6 w-fit">
@@ -152,9 +108,16 @@ export default function Dashboard() {
                             {campaigns.map((c) => (
                                 <div key={c.id} className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center gap-4">
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_STYLES[c.status]}`}>
                                                 {t(`campaign.status_${c.status.toLowerCase()}`)}
+                                            </span>
+                                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${DEPLOY_STYLES[c.deployment_status]}`}>
+                                                {c.deployment_status === "DEPLOYED"
+                                                    ? t("dashboard.deployed")
+                                                    : c.deployment_status === "PENDING"
+                                                    ? t("dashboard.deploying")
+                                                    : t("dashboard.deploy_failed")}
                                             </span>
                                             <span className="text-xs text-gray-600 capitalize">{c.category}</span>
                                         </div>
@@ -162,15 +125,12 @@ export default function Dashboard() {
                                             {c.title}
                                         </Link>
                                         <p className="text-sm text-gray-500 mt-1">
-                                            {t("dashboard.goal")}: {Number(c.goal_amount).toLocaleString()} USDC
+                                            {t("dashboard.goal")}: ${Number(c.goal_amount).toLocaleString()}
                                             {" · "}
                                             {c._count?.donations ?? 0} {t("dashboard.donors")}
                                             {" · "}
                                             {t("dashboard.deadline")}: {new Date(c.deadline).toLocaleDateString()}
                                         </p>
-                                        {!c.contract_address && (
-                                            <p className="text-xs text-yellow-600 mt-1">{t("dashboard.contract_warning")}</p>
-                                        )}
                                     </div>
                                     <Link
                                         to={`/campaign/${c.id}`}
@@ -199,25 +159,26 @@ export default function Dashboard() {
                             {donations.map((d) => (
                                 <div key={d.id} className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4 flex items-center justify-between gap-4">
                                     <div className="min-w-0">
-                                        <p className="text-white font-semibold">
-                                            {Number(d.amount_usdc).toLocaleString()} USDC
-                                        </p>
+                                        {d.campaign && (
+                                            <Link to={`/campaign/${d.campaign.id}`} className="text-white font-semibold hover:text-primary-400 transition-colors truncate block">
+                                                {d.campaign.title}
+                                            </Link>
+                                        )}
                                         <p className="text-xs text-gray-500 mt-0.5">
                                             {new Date(d.created_at).toLocaleDateString()}
                                             {" · "}
-                                            <span className="font-mono">
-                                                {d.tx_hash.slice(0, 10)}…{d.tx_hash.slice(-6)}
+                                            <span className={`inline-block px-1.5 py-0.5 rounded text-xs ${
+                                                d.tx_status === "CONFIRMED" ? "bg-green-900/50 text-green-400" :
+                                                d.tx_status === "FAILED"    ? "bg-red-900/50   text-red-400"   :
+                                                "bg-yellow-900/50 text-yellow-400"
+                                            }`}>
+                                                {d.tx_status}
                                             </span>
                                         </p>
                                     </div>
-                                    <a
-                                        href={`${import.meta.env.VITE_POLYGON_BLOCK_EXPLORER}/tx/${d.tx_hash}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex-shrink-0 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-                                    >
-                                        {t("dashboard.polygonscan")}
-                                    </a>
+                                    <p className="flex-shrink-0 text-lg font-bold text-white">
+                                        ${Number(d.amount_usd).toFixed(2)}
+                                    </p>
                                 </div>
                             ))}
                         </div>

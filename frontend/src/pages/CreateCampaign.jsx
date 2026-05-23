@@ -1,35 +1,30 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Contract, parseUnits } from "ethers";
 import client from "../api/client";
-import { useWallet } from "../hooks/useWallet";
-import { CAMPAIGN_FACTORY_ABI } from "../contracts/abis";
 import LoadingSpinner from "../components/LoadingSpinner";
 
-const FACTORY_ADDRESS = import.meta.env.VITE_CAMPAIGN_FACTORY_ADDRESS;
-const PINATA_JWT      = import.meta.env.VITE_PINATA_JWT;
-const CATEGORIES      = ["medical", "education", "disaster", "community", "business", "creative", "other"];
+const PINATA_JWT     = import.meta.env.VITE_PINATA_JWT;
+const PINATA_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY;
+const CATEGORIES     = ["medical", "education", "disaster", "community", "business", "creative", "other"];
 
 async function uploadToIPFS(file) {
     const form = new FormData();
     form.append("file", file);
     form.append("pinataMetadata", JSON.stringify({ name: file.name }));
     form.append("pinataOptions",  JSON.stringify({ cidVersion: 1 }));
-
     const res = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
         method:  "POST",
         headers: { Authorization: `Bearer ${PINATA_JWT}` },
         body:    form,
     });
-    if (!res.ok) throw new Error("Image upload failed. Check your Pinata JWT.");
+    if (!res.ok) throw new Error("Image upload failed.");
     const data = await res.json();
-    return `${import.meta.env.VITE_PINATA_GATEWAY}/ipfs/${data.IpfsHash}`;
+    return `${PINATA_GATEWAY}/ipfs/${data.IpfsHash}`;
 }
 
 export default function CreateCampaign() {
-    const { t } = useTranslation();
-    const wallet   = useWallet();
+    const { t }    = useTranslation();
     const navigate = useNavigate();
 
     const [form, setForm] = useState({
@@ -37,7 +32,7 @@ export default function CreateCampaign() {
         category: "other", imageFile: null, imagePreview: null,
     });
     const [errors,   setErrors]   = useState({});
-    const [step,     setStep]     = useState(null);
+    const [step,     setStep]     = useState(null); // null | "uploading" | "saving" | "done"
     const [apiError, setApiError] = useState("");
 
     const isSubmitting = step !== null && step !== "done";
@@ -77,20 +72,14 @@ export default function CreateCampaign() {
         e.preventDefault();
         const errs = validate();
         if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-        if (!wallet.isConnected) { await wallet.connect(); return; }
-        if (!wallet.isCorrectNetwork) { await wallet.switchToAmoy(); return; }
-        if (!FACTORY_ADDRESS || FACTORY_ADDRESS.startsWith("fill")) {
-            setApiError(t("create.error_no_contract"));
-            return;
-        }
 
         setApiError("");
 
         try {
-            let imageUrl = null;
-            if (form.imageFile) {
+            let image_url = null;
+            if (form.imageFile && PINATA_JWT) {
                 setStep("uploading");
-                imageUrl = await uploadToIPFS(form.imageFile);
+                image_url = await uploadToIPFS(form.imageFile);
             }
 
             setStep("saving");
@@ -100,39 +89,15 @@ export default function CreateCampaign() {
                 goal_amount: Number(form.goal_amount),
                 deadline:    new Date(form.deadline).toISOString(),
                 category:    form.category,
-                image_url:   imageUrl,
+                image_url,
             };
-            const dbRes    = await client.post("/api/campaigns", payload);
-            const campaign = dbRes.data.campaign;
-
-            setStep("deploying");
-            const signer  = await wallet.provider.getSigner();
-            const factory = new Contract(FACTORY_ADDRESS, CAMPAIGN_FACTORY_ABI, signer);
-
-            const goalInBaseUnits = parseUnits(String(form.goal_amount), 6);
-            const deadlineUnix    = Math.floor(new Date(form.deadline).getTime() / 1000);
-
-            const tx      = await factory.createCampaign(form.title.trim(), goalInBaseUnits, deadlineUnix);
-            const receipt = await tx.wait();
-
-            const iface    = factory.interface;
-            const eventLog = receipt.logs.find((log) => {
-                try { return iface.parseLog(log)?.name === "CampaignCreated"; }
-                catch { return false; }
-            });
-            if (!eventLog) throw new Error("CampaignCreated event not found in transaction receipt.");
-            const contractAddress = iface.parseLog(eventLog).args[0];
-
-            setStep("updating");
-            await client.put(`/api/campaigns/${campaign.id}`, { contract_address: contractAddress });
+            await client.post("/api/campaigns", payload);
 
             setStep("done");
-            setTimeout(() => navigate(`/campaign/${campaign.id}`), 1500);
+            setTimeout(() => navigate("/dashboard"), 1500);
         } catch (err) {
             setStep(null);
-            if (err.code === 4001 || err.code === "ACTION_REJECTED") {
-                setApiError(t("create.error_rejected"));
-            } else if (err.response?.data?.details) {
+            if (err.response?.data?.details) {
                 const serverErrs = {};
                 err.response.data.details.forEach((d) => { serverErrs[d.field] = d.message; });
                 setErrors(serverErrs);
@@ -146,9 +111,6 @@ export default function CreateCampaign() {
         `w-full bg-gray-800 border rounded-lg px-4 py-2.5 text-white placeholder-gray-500
          focus:outline-none focus:border-primary-500 transition-colors
          ${errors[name] ? "border-red-600" : "border-gray-700"}`;
-
-    // Map step key to translation key
-    const stepLabel = step ? t(`create.step_${step}`) : null;
 
     return (
         <div className="min-h-screen bg-gray-950">
@@ -166,7 +128,11 @@ export default function CreateCampaign() {
                     <div className="mb-6 p-4 rounded-xl bg-primary-900/30 border border-primary-800/50 flex items-center gap-3">
                         {step !== "done" && <LoadingSpinner size="sm" />}
                         {step === "done" && <span className="text-green-400 text-lg">✓</span>}
-                        <span className="text-primary-300 text-sm">{stepLabel}</span>
+                        <span className="text-primary-300 text-sm">
+                            {step === "uploading" && t("create.step_uploading")}
+                            {step === "saving"    && t("create.step_saving")}
+                            {step === "done"      && t("create.step_done")}
+                        </span>
                     </div>
                 )}
 
@@ -224,32 +190,15 @@ export default function CreateCampaign() {
                                        file:border-0 file:text-sm file:font-medium file:bg-gray-700 file:text-gray-300
                                        hover:file:bg-gray-600 cursor-pointer" />
                         {errors.image && <p className="mt-1 text-xs text-red-400">{errors.image}</p>}
-                        {!PINATA_JWT && (
-                            <p className="mt-1 text-xs text-yellow-600">
-                                VITE_PINATA_JWT not set — image upload disabled. Add it to frontend/.env.
-                            </p>
-                        )}
                     </div>
 
                     <div className="pt-2">
-                        {!wallet.isConnected ? (
-                            <button type="button" onClick={wallet.connect}
-                                className="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 rounded-xl transition-colors">
-                                {t("create.connect_wallet")}
-                            </button>
-                        ) : !wallet.isCorrectNetwork ? (
-                            <button type="button" onClick={wallet.switchToAmoy}
-                                className="w-full bg-orange-700 hover:bg-orange-600 text-white font-semibold py-3 rounded-xl transition-colors">
-                                {t("create.switch_network")}
-                            </button>
-                        ) : (
-                            <button type="submit" disabled={isSubmitting}
-                                className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed
-                                           text-white font-semibold py-3 rounded-xl transition-colors">
-                                {isSubmitting ? t("create.submitting") : t("create.submit")}
-                            </button>
-                        )}
-                        <p className="text-xs text-gray-600 text-center mt-3">{t("create.gas_note")}</p>
+                        <button type="submit" disabled={isSubmitting}
+                            className="w-full bg-primary-600 hover:bg-primary-500 disabled:opacity-50 disabled:cursor-not-allowed
+                                       text-white font-semibold py-3 rounded-xl transition-colors">
+                            {isSubmitting ? t("create.submitting") : t("create.submit")}
+                        </button>
+                        <p className="text-xs text-gray-600 text-center mt-3">{t("create.setup_note")}</p>
                     </div>
                 </form>
             </div>

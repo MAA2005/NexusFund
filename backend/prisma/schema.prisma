@@ -10,45 +10,65 @@ datasource db {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // USER
-// Stores account data. wallet_address is optional because Phase 2 introduces
-// custodial wallets — some users will never set up MetaMask themselves.
+// wallet_address and encrypted_private_key are kept for backwards compatibility
+// but are no longer used — the platform wallet handles all blockchain operations.
 // ─────────────────────────────────────────────────────────────────────────────
 model User {
-  id                    String     @id @default(cuid())
-  email                 String     @unique
+  id                    String       @id @default(cuid())
+  email                 String       @unique
   password_hash         String
   country               String
-  wallet_address        String?    @unique
+  wallet_address        String?      @unique
   encrypted_private_key String?
-  created_at            DateTime   @default(now())
+  created_at            DateTime     @default(now())
 
-  campaigns Campaign[]
+  campaigns   Campaign[]
+  donations   Donation[]
+  withdrawals Withdrawal[]
 
   @@map("users")
 }
 
+enum CampaignStatus {
+  ACTIVE
+  SUCCESSFUL
+  FAILED
+  WITHDRAWN
+}
+
+enum DeploymentStatus {
+  PENDING   // Created in DB, awaiting contract deployment
+  DEPLOYED  // Smart contract live on Polygon Amoy
+  FAILED    // Deployment failed after retries
+}
+
+enum TxStatus {
+  PENDING    // Recorded in DB, blockchain tx not yet submitted
+  CONFIRMED  // Blockchain tx confirmed
+  FAILED     // Blockchain tx failed after retries
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CAMPAIGN
-// goal_amount and raised amounts use Decimal(20,6) because USDC has 6 decimal
-// places. Using Decimal instead of Float prevents floating-point rounding errors
-// in financial calculations — a Float can silently misrepresent $1000.00 as
-// $999.9999999 which would break the "goal reached" check.
 // ─────────────────────────────────────────────────────────────────────────────
 model Campaign {
-  id               String         @id @default(cuid())
-  title            String
-  description      String
-  goal_amount      Decimal        @db.Decimal(20, 6)
-  deadline         DateTime
-  creator_id       String
-  contract_address String?        @unique
-  image_url        String?
-  category         String
-  status           CampaignStatus @default(ACTIVE)
-  created_at       DateTime       @default(now())
+  id                String           @id @default(cuid())
+  title             String
+  description       String
+  goal_amount       Decimal          @db.Decimal(20, 6)
+  deadline          DateTime
+  creator_id        String
+  contract_address  String?          @unique
+  contract_tx_hash  String?
+  deployment_status DeploymentStatus @default(PENDING)
+  image_url         String?
+  category          String
+  status            CampaignStatus   @default(ACTIVE)
+  created_at        DateTime         @default(now())
 
-  creator   User       @relation(fields: [creator_id], references: [id])
-  donations Donation[]
+  creator     User         @relation(fields: [creator_id], references: [id])
+  donations   Donation[]
+  withdrawals Withdrawal[]
 
   @@index([creator_id])
   @@index([status])
@@ -58,27 +78,49 @@ model Campaign {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DONATION
-// tx_hash must be unique — this prevents a race condition where a malicious
-// user submits the same blockchain transaction twice to our API and gets
-// double-counted. Prisma/PostgreSQL enforces this at the database level.
+// Donations are recorded in DB immediately (PENDING), then the platform wallet
+// sends USDC on-chain in the background. tx_hash is null until confirmed.
+// user_id tracks which platform user made the donation (not donor_wallet).
 // ─────────────────────────────────────────────────────────────────────────────
 model Donation {
   id           String   @id @default(cuid())
   campaign_id  String
-  donor_wallet String
+  user_id      String?
+  donor_wallet String?
   amount_usdc  Decimal  @db.Decimal(20, 6)
-  tx_hash      String   @unique
+  amount_usd   Float    @default(0)
+  tx_hash      String?  @unique
+  tx_status    TxStatus @default(PENDING)
   created_at   DateTime @default(now())
 
   campaign Campaign @relation(fields: [campaign_id], references: [id])
+  user     User?    @relation(fields: [user_id], references: [id])
 
   @@index([campaign_id])
+  @@index([user_id])
   @@map("donations")
 }
 
-enum CampaignStatus {
-  ACTIVE      // Accepting donations, deadline not passed
-  SUCCESSFUL  // Deadline passed, goal was met
-  FAILED      // Deadline passed, goal was NOT met (refunds available)
-  WITHDRAWN   // Creator has withdrawn funds
+// ─────────────────────────────────────────────────────────────────────────────
+// WITHDRAWAL
+// Created when a creator requests withdrawal. Platform wallet calls
+// campaign.withdraw() on-chain in the background.
+// ─────────────────────────────────────────────────────────────────────────────
+model Withdrawal {
+  id           String   @id @default(cuid())
+  campaign_id  String
+  user_id      String
+  amount_usdc  Decimal  @db.Decimal(20, 6)
+  platform_fee Decimal  @db.Decimal(20, 6)
+  net_amount   Decimal  @db.Decimal(20, 6)
+  tx_hash      String?  @unique
+  tx_status    TxStatus @default(PENDING)
+  created_at   DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaign_id], references: [id])
+  user     User     @relation(fields: [user_id], references: [id])
+
+  @@index([campaign_id])
+  @@index([user_id])
+  @@map("withdrawals")
 }

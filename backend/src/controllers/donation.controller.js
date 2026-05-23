@@ -1,90 +1,99 @@
-const prisma  = require("../lib/prisma");
+const prisma         = require("../lib/prisma");
+const platformWallet = require("../services/platformWallet");
 const { sendDonationAlert } = require("../lib/mailer");
 
 // ─── POST /api/donations ──────────────────────────────────────────────────────
-// Records a donation that already happened on the blockchain.
-// The blockchain is the source of financial truth — this is just a DB mirror
-// for display purposes (donor list, total shown on campaign page).
-//
-// Production note: In a high-security deployment, this endpoint should verify
-// the tx_hash on-chain before recording it (call the Polygon RPC, check the
-// tx recipient and amount). We skip that here and rely on the unique tx_hash
-// constraint to prevent the main abuse vector (double-recording the same tx).
+// Client sends { campaign_id, amount_usd }.
+// We record the donation immediately (PENDING), respond to the user,
+// then process the on-chain USDC transfer in the background.
+// 1 USD = 1 USDC (stablecoin peg).
 async function recordDonation(req, res) {
-    const { campaign_id, donor_wallet, amount_usdc, tx_hash } = req.body;
+    const { campaign_id, amount_usd } = req.body;
+    const amount_usdc = amount_usd; // USDC is dollar-pegged
 
     try {
-        // Verify the campaign exists and is still accepting donations
         const campaign = await prisma.campaign.findUnique({
             where:   { id: campaign_id },
-            include: {
-                creator: {
-                    select: { email: true },
-                },
-            },
+            include: { creator: { select: { email: true } } },
         });
 
         if (!campaign) {
             return res.status(404).json({ error: "Campaign not found." });
         }
-
         if (campaign.status !== "ACTIVE") {
             return res.status(400).json({
                 error: `This campaign is ${campaign.status.toLowerCase()} and no longer accepts donations.`,
             });
         }
-
         if (new Date() > campaign.deadline) {
             return res.status(400).json({ error: "This campaign's deadline has passed." });
-        }
-
-        // Check tx_hash uniqueness before attempting insert to give a clear error message.
-        // The DB unique constraint is the actual guard — this check gives a better error message.
-        const existing = await prisma.donation.findUnique({ where: { tx_hash } });
-        if (existing) {
-            return res.status(409).json({ error: "This transaction has already been recorded." });
         }
 
         const donation = await prisma.donation.create({
             data: {
                 campaign_id,
-                donor_wallet,
+                user_id:   req.user.id,
+                amount_usd,
                 amount_usdc,
-                tx_hash,
+                tx_status: "PENDING",
             },
         });
 
-        // ── Send email notification to campaign creator ────────────────────────
-        // Run fire-and-forget: we respond 201 immediately and let the email send
-        // in the background. Email failure must never fail the donation record.
-        if (campaign.creator?.email) {
-            prisma.donation
-                .aggregate({
-                    where: { campaign_id },
-                    _sum:  { amount_usdc: true },
-                })
-                .then(({ _sum }) => {
-                    const totalRaised = Number(_sum.amount_usdc ?? 0).toFixed(2);
-                    sendDonationAlert({
-                        creatorEmail:  campaign.creator.email,
-                        donorWallet:   donor_wallet,
-                        amountUsdc:    Number(amount_usdc).toFixed(2),
-                        campaignTitle: campaign.title,
-                        totalRaised,
-                        campaignId:    campaign_id,
-                    });
-                })
-                .catch((err) => console.error("[recordDonation] aggregate failed:", err.message));
-        }
+        // Respond immediately — never make the user wait for blockchain
+        res.status(201).json({
+            donation: {
+                id:         donation.id,
+                amount_usd: donation.amount_usd,
+                tx_status:  donation.tx_status,
+                created_at: donation.created_at,
+                message:    `Thank you! Your donation of $${amount_usd.toFixed(2)} has been received.`,
+            },
+        });
 
-        return res.status(201).json({ donation });
-    } catch (err) {
-        // P2002: Prisma unique constraint — catches the race condition where two
-        // identical requests arrive simultaneously and both pass the findUnique check above
-        if (err.code === "P2002") {
-            return res.status(409).json({ error: "This transaction has already been recorded." });
+        // Background: send USDC via the platform wallet
+        if (platformWallet.isConfigured() && campaign.contract_address) {
+            (async () => {
+                try {
+                    const { txHash } = await platformWallet.donate({
+                        campaignAddress: campaign.contract_address,
+                        amountUsdc:      amount_usdc,
+                    });
+                    await prisma.donation.update({
+                        where: { id: donation.id },
+                        data: {
+                            tx_hash:     txHash,
+                            tx_status:   "CONFIRMED",
+                            donor_wallet: process.env.PLATFORM_WALLET_ADDRESS || null,
+                        },
+                    });
+                    console.log(`[recordDonation] ${donation.id} confirmed → ${txHash}`);
+
+                    if (campaign.creator?.email) {
+                        prisma.donation
+                            .aggregate({
+                                where: { campaign_id, tx_status: "CONFIRMED" },
+                                _sum:  { amount_usdc: true },
+                            })
+                            .then(({ _sum }) => {
+                                sendDonationAlert({
+                                    creatorEmail:  campaign.creator.email,
+                                    amountUsd:     amount_usd.toFixed(2),
+                                    campaignTitle: campaign.title,
+                                    totalRaised:   Number(_sum.amount_usdc ?? 0).toFixed(2),
+                                    campaignId:    campaign_id,
+                                });
+                            })
+                            .catch((e) => console.error("[recordDonation] aggregate error:", e.message));
+                    }
+                } catch (err) {
+                    console.error(`[recordDonation] blockchain failed for ${donation.id}:`, err.message);
+                    // Stays PENDING — retry job will attempt again in 5 minutes
+                }
+            })();
+        } else if (!campaign.contract_address) {
+            console.warn(`[recordDonation] Campaign ${campaign_id} not yet deployed — donation stays PENDING`);
         }
-        // P2003: Foreign key constraint — campaign_id doesn't exist in campaigns table
+    } catch (err) {
         if (err.code === "P2003") {
             return res.status(404).json({ error: "Campaign not found." });
         }
@@ -100,34 +109,28 @@ async function getCampaignDonations(req, res) {
     const skip  = (page - 1) * limit;
 
     try {
-        // Confirm campaign exists before returning its donations
         const campaign = await prisma.campaign.findUnique({
             where:  { id: req.params.campaignId },
             select: { id: true },
         });
-
-        if (!campaign) {
-            return res.status(404).json({ error: "Campaign not found." });
-        }
+        if (!campaign) return res.status(404).json({ error: "Campaign not found." });
 
         const [donations, total] = await Promise.all([
             prisma.donation.findMany({
-                where:   { campaign_id: req.params.campaignId },
+                where:   { campaign_id: req.params.campaignId, tx_status: "CONFIRMED" },
                 orderBy: { created_at: "desc" },
-                skip,
-                take:    limit,
+                skip, take: limit,
+                select: { id: true, amount_usd: true, amount_usdc: true, created_at: true },
             }),
             prisma.donation.count({
-                where: { campaign_id: req.params.campaignId },
+                where: { campaign_id: req.params.campaignId, tx_status: "CONFIRMED" },
             }),
         ]);
 
         return res.json({
             donations,
             pagination: {
-                total,
-                page,
-                limit,
+                total, page, limit,
                 totalPages: Math.ceil(total / limit),
                 hasNext:    page < Math.ceil(total / limit),
                 hasPrev:    page > 1,
@@ -140,44 +143,27 @@ async function getCampaignDonations(req, res) {
 }
 
 // ─── GET /api/donations/mine ──────────────────────────────────────────────────
-// Returns all donations made by the authenticated user, identified by their
-// wallet address. Includes campaign title so the dashboard can display it.
+// Returns donations for the authenticated user, identified by user_id.
 async function getMyDonations(req, res) {
     const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip  = (page - 1) * limit;
 
     try {
-        const user = await prisma.user.findUnique({
-            where:  { id: req.user.id },
-            select: { wallet_address: true },
-        });
-
-        if (!user?.wallet_address) {
-            return res.json({ donations: [], pagination: { total: 0, page, limit, totalPages: 0, hasNext: false, hasPrev: false } });
-        }
-
         const [donations, total] = await Promise.all([
             prisma.donation.findMany({
-                where:   { donor_wallet: { equals: user.wallet_address, mode: "insensitive" } },
+                where:   { user_id: req.user.id },
                 orderBy: { created_at: "desc" },
-                skip,
-                take:    limit,
-                include: {
-                    campaign: { select: { id: true, title: true } },
-                },
+                skip, take: limit,
+                include: { campaign: { select: { id: true, title: true } } },
             }),
-            prisma.donation.count({
-                where: { donor_wallet: { equals: user.wallet_address, mode: "insensitive" } },
-            }),
+            prisma.donation.count({ where: { user_id: req.user.id } }),
         ]);
 
         return res.json({
             donations,
             pagination: {
-                total,
-                page,
-                limit,
+                total, page, limit,
                 totalPages: Math.ceil(total / limit),
                 hasNext:    page < Math.ceil(total / limit),
                 hasPrev:    page > 1,
