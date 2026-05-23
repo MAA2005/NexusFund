@@ -8,7 +8,6 @@ const PINATA_JWT     = import.meta.env.VITE_PINATA_JWT;
 const PINATA_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY;
 const CATEGORIES     = ["medical", "education", "disaster", "community", "business", "creative", "other"];
 
-// Uploads the original file — position is CSS-only, no server crop needed
 async function uploadToIPFS(file) {
     const form = new FormData();
     form.append("file", file);
@@ -24,18 +23,20 @@ async function uploadToIPFS(file) {
     return `${PINATA_GATEWAY}/ipfs/${data.IpfsHash}`;
 }
 
-// ─── Drag-to-reposition image component ───────────────────────────────────────
+// ─── Drag-to-reposition + zoom image component ────────────────────────────────
 function ImagePositioner({ src, position, onPositionChange }) {
     const containerRef = useRef(null);
     const dragging     = useRef(false);
     const lastPos      = useRef({ x: 0, y: 0 });
+    const [zoom, setZoom] = useState(1);
 
     const clamp = (val, min, max) => Math.min(Math.max(val, min), max);
 
     const startDrag = useCallback((clientX, clientY) => {
+        if (zoom <= 1) return;
         dragging.current = true;
         lastPos.current  = { x: clientX, y: clientY };
-    }, []);
+    }, [zoom]);
 
     const onDrag = useCallback((clientX, clientY) => {
         if (!dragging.current) return;
@@ -43,51 +44,69 @@ function ImagePositioner({ src, position, onPositionChange }) {
         const dy = clientY - lastPos.current.y;
         lastPos.current = { x: clientX, y: clientY };
         onPositionChange((prev) => ({
-            x: clamp(prev.x + dx, -100, 100),
-            y: clamp(prev.y + dy, -100, 100),
+            x: clamp(prev.x + dx, -200, 200),
+            y: clamp(prev.y + dy, -200, 200),
         }));
     }, [onPositionChange]);
 
     const stopDrag = useCallback(() => { dragging.current = false; }, []);
 
     return (
-        <div
-            ref={containerRef}
-            className="relative w-full h-48 rounded-xl overflow-hidden cursor-grab active:cursor-grabbing select-none border border-gray-700"
-            onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
-            onMouseMove={(e) => onDrag(e.clientX, e.clientY)}
-            onMouseUp={stopDrag}
-            onMouseLeave={stopDrag}
-            onTouchStart={(e) => startDrag(e.touches[0].clientX, e.touches[0].clientY)}
-            onTouchMove={(e) => { e.preventDefault(); onDrag(e.touches[0].clientX, e.touches[0].clientY); }}
-            onTouchEnd={stopDrag}
-        >
-            <img
-                src={src}
-                alt="Preview"
-                draggable={false}
-                className="absolute w-full h-full pointer-events-none"
-                style={{
-                    objectFit: "cover",
-                    objectPosition: `calc(50% + ${position.x}px) calc(50% + ${position.y}px)`,
-                    transition: dragging.current ? "none" : "object-position 0.1s",
-                }}
-            />
-            {/* Overlay hint */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/30">
-                <div className="flex items-center gap-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M7 11l5-5m0 0l5 5m-5-5v12" />
-                    </svg>
-                    Drag to reposition
-                </div>
+        <div className="flex flex-col gap-2">
+            <div
+                ref={containerRef}
+                className="relative w-full h-56 rounded-xl overflow-hidden select-none border border-gray-700 bg-gray-900"
+                style={{ cursor: zoom > 1 ? "grab" : "default" }}
+                onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
+                onMouseMove={(e) => onDrag(e.clientX, e.clientY)}
+                onMouseUp={stopDrag}
+                onMouseLeave={stopDrag}
+                onTouchStart={(e) => startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+                onTouchMove={(e) => { e.preventDefault(); onDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+                onTouchEnd={stopDrag}
+            >
+                <img
+                    src={src}
+                    alt="Preview"
+                    draggable={false}
+                    className="absolute inset-0 w-full h-full pointer-events-none transition-transform duration-100"
+                    style={{
+                        objectFit: zoom <= 1 ? "contain" : "cover",
+                        objectPosition: `calc(50% + ${position.x}px) calc(50% + ${position.y}px)`,
+                        transform: `scale(${zoom})`,
+                        transformOrigin: "center",
+                    }}
+                />
+                {zoom <= 1 && (
+                    <div className="absolute bottom-2 right-2 text-xs text-gray-400 bg-black/50 px-2 py-1 rounded-full backdrop-blur-sm">
+                        Zoom in to reposition
+                    </div>
+                )}
+                {zoom > 1 && (
+                    <div className="absolute bottom-2 right-2 text-xs text-white bg-black/60 px-2 py-1 rounded-full backdrop-blur-sm">
+                        Drag to reposition
+                    </div>
+                )}
             </div>
-            {/* Corner indicator dots */}
-            <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-white/40" />
-            <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-white/40" />
-            <div className="absolute bottom-2 left-2 w-1.5 h-1.5 rounded-full bg-white/40" />
-            <div className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full bg-white/40" />
+
+            {/* Zoom slider */}
+            <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-500 w-8">Zoom</span>
+                <input
+                    type="range"
+                    min="1"
+                    max="3"
+                    step="0.05"
+                    value={zoom}
+                    onChange={(e) => {
+                        const newZoom = Number(e.target.value);
+                        setZoom(newZoom);
+                        if (newZoom <= 1) onPositionChange({ x: 0, y: 0 });
+                    }}
+                    className="flex-1 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-xs text-gray-500 w-8">{zoom.toFixed(1)}x</span>
+            </div>
         </div>
     );
 }
@@ -122,7 +141,7 @@ export default function CreateCampaign() {
             return;
         }
         setForm((f) => ({ ...f, imageFile: file, imagePreview: URL.createObjectURL(file) }));
-        setImagePosition({ x: 0, y: 0 }); // reset position on new image
+        setImagePosition({ x: 0, y: 0 });
         setErrors((er) => ({ ...er, image: "" }));
     }
 
@@ -155,7 +174,6 @@ export default function CreateCampaign() {
             if (form.imageFile && PINATA_JWT) {
                 setStep("uploading");
                 image_url = await uploadToIPFS(form.imageFile);
-                // Append position as URL fragment so cards can read it
                 if (imagePosition.x !== 0 || imagePosition.y !== 0) {
                     image_url += `#pos:${imagePosition.x},${imagePosition.y}`;
                 }
@@ -271,7 +289,7 @@ export default function CreateCampaign() {
                                     onPositionChange={setImagePosition}
                                 />
                                 <div className="flex items-center justify-between">
-                                    <p className="text-xs text-gray-500">Drag the image to reposition</p>
+                                    <p className="text-xs text-gray-500">Zoom in then drag to reposition</p>
                                     <button
                                         type="button"
                                         onClick={handleRemoveImage}
