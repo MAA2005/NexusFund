@@ -12,14 +12,26 @@ const walletRoutes   = require("./routes/wallet.routes");
 const app = express();
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// Allows only the exact frontend origin — never use wildcard "*" in production.
-// A wildcard would allow any website to call your API with the user's cookies.
+// FRONTEND_URL supports comma-separated origins so multiple Vercel preview URLs
+// can be allowlisted without a wildcard.
+// The origin function returns only the matching single origin — browsers reject
+// responses where Access-Control-Allow-Origin contains more than one value.
+const allowedOrigins = (process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
 app.use(
     cors({
-        origin:          process.env.FRONTEND_URL,
-        methods:         ["GET", "POST", "PUT"],
-        allowedHeaders:  ["Content-Type", "Authorization"],
-        credentials:     true,
+        origin(origin, callback) {
+            // Allow requests with no Origin header (server-to-server, curl, mobile)
+            if (!origin) return callback(null, true);
+            if (allowedOrigins.includes(origin)) return callback(null, origin);
+            callback(new Error(`CORS: origin ${origin} not allowed`));
+        },
+        methods:        ["GET", "POST", "PUT"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+        credentials:    true,
     })
 );
 
