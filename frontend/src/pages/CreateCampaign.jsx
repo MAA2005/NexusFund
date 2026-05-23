@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import client from "../api/client";
@@ -8,6 +8,7 @@ const PINATA_JWT     = import.meta.env.VITE_PINATA_JWT;
 const PINATA_GATEWAY = import.meta.env.VITE_PINATA_GATEWAY;
 const CATEGORIES     = ["medical", "education", "disaster", "community", "business", "creative", "other"];
 
+// Uploads the original file — position is CSS-only, no server crop needed
 async function uploadToIPFS(file) {
     const form = new FormData();
     form.append("file", file);
@@ -23,6 +24,74 @@ async function uploadToIPFS(file) {
     return `${PINATA_GATEWAY}/ipfs/${data.IpfsHash}`;
 }
 
+// ─── Drag-to-reposition image component ───────────────────────────────────────
+function ImagePositioner({ src, position, onPositionChange }) {
+    const containerRef = useRef(null);
+    const dragging     = useRef(false);
+    const lastPos      = useRef({ x: 0, y: 0 });
+
+    const clamp = (val, min, max) => Math.min(Math.max(val, min), max);
+
+    const startDrag = useCallback((clientX, clientY) => {
+        dragging.current = true;
+        lastPos.current  = { x: clientX, y: clientY };
+    }, []);
+
+    const onDrag = useCallback((clientX, clientY) => {
+        if (!dragging.current) return;
+        const dx = clientX - lastPos.current.x;
+        const dy = clientY - lastPos.current.y;
+        lastPos.current = { x: clientX, y: clientY };
+        onPositionChange((prev) => ({
+            x: clamp(prev.x + dx, -100, 100),
+            y: clamp(prev.y + dy, -100, 100),
+        }));
+    }, [onPositionChange]);
+
+    const stopDrag = useCallback(() => { dragging.current = false; }, []);
+
+    return (
+        <div
+            ref={containerRef}
+            className="relative w-full h-48 rounded-xl overflow-hidden cursor-grab active:cursor-grabbing select-none border border-gray-700"
+            onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
+            onMouseMove={(e) => onDrag(e.clientX, e.clientY)}
+            onMouseUp={stopDrag}
+            onMouseLeave={stopDrag}
+            onTouchStart={(e) => startDrag(e.touches[0].clientX, e.touches[0].clientY)}
+            onTouchMove={(e) => { e.preventDefault(); onDrag(e.touches[0].clientX, e.touches[0].clientY); }}
+            onTouchEnd={stopDrag}
+        >
+            <img
+                src={src}
+                alt="Preview"
+                draggable={false}
+                className="absolute w-full h-full pointer-events-none"
+                style={{
+                    objectFit: "cover",
+                    objectPosition: `calc(50% + ${position.x}px) calc(50% + ${position.y}px)`,
+                    transition: dragging.current ? "none" : "object-position 0.1s",
+                }}
+            />
+            {/* Overlay hint */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity bg-black/30">
+                <div className="flex items-center gap-2 bg-black/60 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                            d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                    </svg>
+                    Drag to reposition
+                </div>
+            </div>
+            {/* Corner indicator dots */}
+            <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-white/40" />
+            <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-white/40" />
+            <div className="absolute bottom-2 left-2 w-1.5 h-1.5 rounded-full bg-white/40" />
+            <div className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full bg-white/40" />
+        </div>
+    );
+}
+
 export default function CreateCampaign() {
     const { t }    = useTranslation();
     const navigate = useNavigate();
@@ -31,8 +100,9 @@ export default function CreateCampaign() {
         title: "", description: "", goal_amount: "", deadline: "",
         category: "other", imageFile: null, imagePreview: null,
     });
+    const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 });
     const [errors,   setErrors]   = useState({});
-    const [step,     setStep]     = useState(null); // null | "uploading" | "saving" | "done"
+    const [step,     setStep]     = useState(null);
     const [apiError, setApiError] = useState("");
 
     const isSubmitting = step !== null && step !== "done";
@@ -52,7 +122,13 @@ export default function CreateCampaign() {
             return;
         }
         setForm((f) => ({ ...f, imageFile: file, imagePreview: URL.createObjectURL(file) }));
+        setImagePosition({ x: 0, y: 0 }); // reset position on new image
         setErrors((er) => ({ ...er, image: "" }));
+    }
+
+    function handleRemoveImage() {
+        setForm((f) => ({ ...f, imageFile: null, imagePreview: null }));
+        setImagePosition({ x: 0, y: 0 });
     }
 
     function validate() {
@@ -72,7 +148,6 @@ export default function CreateCampaign() {
         e.preventDefault();
         const errs = validate();
         if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-
         setApiError("");
 
         try {
@@ -80,6 +155,10 @@ export default function CreateCampaign() {
             if (form.imageFile && PINATA_JWT) {
                 setStep("uploading");
                 image_url = await uploadToIPFS(form.imageFile);
+                // Append position as URL fragment so cards can read it
+                if (imagePosition.x !== 0 || imagePosition.y !== 0) {
+                    image_url += `#pos:${imagePosition.x},${imagePosition.y}`;
+                }
             }
 
             setStep("saving");
@@ -177,18 +256,37 @@ export default function CreateCampaign() {
                         </select>
                     </div>
 
+                    {/* ── Image upload ── */}
                     <div>
                         <label className="block text-sm font-medium text-gray-300 mb-1.5">
                             {t("create.field_image")}{" "}
                             <span className="text-gray-500 font-normal">{t("create.field_image_optional")}</span>
                         </label>
-                        {form.imagePreview && (
-                            <img src={form.imagePreview} alt="Preview" className="w-full h-48 object-cover rounded-lg mb-3" />
+
+                        {form.imagePreview ? (
+                            <div className="flex flex-col gap-2">
+                                <ImagePositioner
+                                    src={form.imagePreview}
+                                    position={imagePosition}
+                                    onPositionChange={setImagePosition}
+                                />
+                                <div className="flex items-center justify-between">
+                                    <p className="text-xs text-gray-500">Drag the image to reposition</p>
+                                    <button
+                                        type="button"
+                                        onClick={handleRemoveImage}
+                                        className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                                    >
+                                        ✕ Remove image
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <input type="file" accept="image/*" onChange={handleImageChange}
+                                className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg
+                                           file:border-0 file:text-sm file:font-medium file:bg-gray-700 file:text-gray-300
+                                           hover:file:bg-gray-600 cursor-pointer" />
                         )}
-                        <input type="file" accept="image/*" onChange={handleImageChange}
-                            className="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg
-                                       file:border-0 file:text-sm file:font-medium file:bg-gray-700 file:text-gray-300
-                                       hover:file:bg-gray-600 cursor-pointer" />
                         {errors.image && <p className="mt-1 text-xs text-red-400">{errors.image}</p>}
                     </div>
 
